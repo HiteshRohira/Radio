@@ -50,7 +50,6 @@ struct PlayerControlCard: View {
     private var headerRow: some View {
         HStack(spacing: 8) {
             Image(systemName: "waveform")
-                .symbolEffect(.variableColor.iterative, options: .repeating, isActive: player.isPlaying && controlsVisible)
                 .foregroundStyle(player.isPlaying ? .green : .secondary)
                 .font(.subheadline)
 

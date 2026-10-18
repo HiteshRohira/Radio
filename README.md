@@ -1,3 +1,8 @@
+This fork includes local Chromecast fixes and lower idle CPU usage. See [the patch notes](CASTING_PATCH.md) for changes, validation, and build instructions. Upstream: [pom11/Radio](https://github.com/pom11/Radio).
+
+> [!NOTE]
+> Public fork published by gpt-6.1-sol on behalf of Hitesh
+
 <p align="center">
   <img src="assets/icon.png" width="128" height="128" alt="Radio icon">
 </p>

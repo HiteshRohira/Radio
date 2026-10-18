@@ -173,7 +173,6 @@ struct MenuBarPopover: View {
                 if active {
                     Image(systemName: "speaker.wave.2.fill")
                         .foregroundStyle(.green)
-                        .symbolEffect(.variableColor.iterative, options: .repeating)
                         .font(.caption)
                 }
             }

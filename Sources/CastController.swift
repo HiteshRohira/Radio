@@ -375,7 +375,8 @@ private final class CastConnection: @unchecked Sendable {
     private func takeReceivedMessage(
         namespace: String?,
         type: String?,
-        substring: String?
+        substring: String?,
+        requestId: Int?
     ) -> CastProtobuf.DecodedCastMessage? {
         lock.lock()
         defer { lock.unlock() }
@@ -383,6 +384,11 @@ private final class CastConnection: @unchecked Sendable {
             if let ns = namespace, msg.namespace != ns { return false }
             if let t = type, !msg.payloadUTF8.contains("\"\(t)\"") { return false }
             if let s = substring, !msg.payloadUTF8.contains(s) { return false }
+            if let requestId {
+                guard let data = msg.payloadUTF8.data(using: .utf8),
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      json["requestId"] as? Int == requestId else { return false }
+            }
             return true
         }) else { return nil }
         return receivedMessages.remove(at: idx)
@@ -392,11 +398,12 @@ private final class CastConnection: @unchecked Sendable {
         namespace: String? = nil,
         containingType type: String? = nil,
         containing substring: String? = nil,
+        requestId: Int? = nil,
         timeout: TimeInterval = 10
     ) async -> CastProtobuf.DecodedCastMessage? {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            if let msg = takeReceivedMessage(namespace: namespace, type: type, substring: substring) {
+            if let msg = takeReceivedMessage(namespace: namespace, type: type, substring: substring, requestId: requestId) {
                 return msg
             }
             try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
@@ -422,7 +429,7 @@ private final class CastConnection: @unchecked Sendable {
         sendMessage(namespace: Namespace.receiver, destination: "receiver-0", payload: payload)
 
         // Wait for RECEIVER_STATUS that has applications (skip idle status broadcasts)
-        guard let msg = await waitForMessage(namespace: Namespace.receiver, containingType: "RECEIVER_STATUS", containing: "\"applications\"", timeout: 15) else {
+        guard let msg = await waitForMessage(namespace: Namespace.receiver, containingType: "RECEIVER_STATUS", containing: "\"applications\"", requestId: rid, timeout: 15) else {
             logger.error("launchApp: no RECEIVER_STATUS within 15s")
             throw CastError.launchFailed
         }
@@ -461,7 +468,7 @@ private final class CastConnection: @unchecked Sendable {
         sendMessage(namespace: Namespace.media, destination: tid, payload: payload)
 
         // Wait for media status to get session ID
-        if let msg = await waitForMessage(namespace: Namespace.media, containingType: "MEDIA_STATUS", timeout: 10) {
+        if let msg = await waitForMessage(namespace: Namespace.media, containingType: "MEDIA_STATUS", requestId: rid, timeout: 10) {
             parseMediaSessionId(from: msg.payloadUTF8)
         }
     }
@@ -498,7 +505,7 @@ private final class CastConnection: @unchecked Sendable {
             payload: #"{"type":"GET_STATUS","requestId":\#(statusRid)}"#
         )
 
-        if let msg = await waitForMessage(namespace: Namespace.media, containingType: "MEDIA_STATUS", timeout: 5) {
+        if let msg = await waitForMessage(namespace: Namespace.media, containingType: "MEDIA_STATUS", requestId: statusRid, timeout: 5) {
             parseMediaSessionId(from: msg.payloadUTF8)
 
             if msg.payloadUTF8.contains("\"PLAYING\"") {
@@ -561,7 +568,7 @@ private final class CastConnection: @unchecked Sendable {
         var volumeLevel = 50
         var playerState = "IDLE"
 
-        if let rMsg = await waitForMessage(namespace: Namespace.receiver, containingType: "RECEIVER_STATUS", timeout: 5) {
+        if let rMsg = await waitForMessage(namespace: Namespace.receiver, containingType: "RECEIVER_STATUS", requestId: rRid, timeout: 5) {
             if let jsonData = rMsg.payloadUTF8.data(using: .utf8),
                let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
                let status = json["status"] as? [String: Any],
@@ -579,7 +586,7 @@ private final class CastConnection: @unchecked Sendable {
                 destination: tid,
                 payload: #"{"type":"GET_STATUS","requestId":\#(mRid)}"#
             )
-            if let mMsg = await waitForMessage(namespace: Namespace.media, containingType: "MEDIA_STATUS", timeout: 5) {
+            if let mMsg = await waitForMessage(namespace: Namespace.media, containingType: "MEDIA_STATUS", requestId: mRid, timeout: 5) {
                 if let jsonData = mMsg.payloadUTF8.data(using: .utf8),
                    let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
                    let statuses = json["status"] as? [[String: Any]],
@@ -697,7 +704,7 @@ final class CastController: @unchecked Sendable {
                 var resolveConns: [NWConnection] = []
             }
             let box = DiscoveryBox()
-            let browser = NWBrowser(for: .bonjour(type: "_googlecast._tcp.", domain: nil), using: .tcp)
+            let browser = NWBrowser(for: .bonjourWithTXTRecord(type: "_googlecast._tcp", domain: "local."), using: .tcp)
             let queue = DispatchQueue(label: "ro.pom.radio.cast.discovery")
 
             browser.browseResultsChangedHandler = { results, _ in
